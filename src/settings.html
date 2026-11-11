@@ -199,6 +199,11 @@ kbd { font: inherit; font-size: 12.5px; padding: 2px 8px; border: 1px solid var(
       </div>
     </div>
     <p class="hint" data-t="model_note"></p>
+    <div class="card">
+      <div class="row"><div><b data-t="model_folder"></b><small id="model_folder" style="user-select:text;word-break:break-all"></small></div></div>
+      <div class="actions"><button class="btn" id="folder_pick" data-t="folder_pick"></button><button class="btn" id="folder_reset" data-t="folder_reset"></button></div>
+    </div>
+    <p class="hint" data-t="model_folder_note"></p>
   </section>
 
   <section id="keys">
@@ -343,7 +348,8 @@ const TEXT = {
     model: '翻訳モデル', download: 'ダウンロード', cancel: '中止', delete: '削除', load: '読み込む', unload: 'アンロード',
     st_verify: 'ダウンロードしたファイルを確認しています', st_down: 'ダウンロード中', st_part: '途中までダウンロードしてあります（続きから再開できます）',
     st_none: 'ダウンロードされていません', st_ready: '読み込み済み（すぐ翻訳できます）', st_loading: '読み込み中…', st_idle: '読み込まれていません（最初の翻訳のときに読み込みます）',
-    model_note: 'ほかの GGUF モデルも使えます。置き場所は README に書いてあります。', other_gguf: 'ほかの GGUF モデルも使えます。置き場所は README に書いてあります。',
+    model_folder: 'モデルの保存先', folder_pick: 'フォルダを選ぶ', folder_reset: '既定に戻す', model_folder_note: '翻訳モデルを読み込むフォルダで、ダウンロードもここに保存します。保存先を変えても、前のフォルダのモデルは移動も削除もしません。', folder_settings: '設定の保存先',
+    model_note: 'ほかの GGUF モデルも、下の保存先のフォルダに置くと使えます。', other_gguf: 'ほかの GGUF モデルも使えます。置き場所は README に書いてあります。',
     key_once: '範囲を 1 回翻訳', key_live: 'リアルタイム翻訳', key_clear: '訳文を消す', key_wait: 'キーを押してください…',
     key_note: 'Ctrl か Alt を含むキー、またはマウスの中ボタンとサイドボタンを押します。Esc で取り消せます。', key_bad: 'Ctrl か Alt を含めてください',
     key_reset: 'リセット', key_disable: '無効', keys_reset: 'すべて既定に戻す', key_none: '無効',
@@ -394,7 +400,8 @@ const TEXT = {
     model: 'Translation model', download: 'Download', cancel: 'Cancel', delete: 'Delete', load: 'Load', unload: 'Unload',
     st_verify: 'Checking the downloaded file', st_down: 'Downloading', st_part: 'Partly downloaded (it can resume)',
     st_none: 'Not downloaded', st_ready: 'Loaded and ready', st_loading: 'Loading…', st_idle: 'Not loaded (loads with the first translation)',
-    model_note: 'Other GGUF models work too. The README says where to put them.', other_gguf: 'Other GGUF models work too. The README says where to put them.',
+    model_folder: 'Model folder', folder_pick: 'Choose folder', folder_reset: 'Use default', model_folder_note: 'Translation models are loaded from this folder, and downloads are saved here. Changing it neither moves nor deletes the models in the old folder.', folder_settings: 'Settings are stored in',
+    model_note: 'Other GGUF models work too: put them in the model folder below.', other_gguf: 'Other GGUF models work too. The README says where to put them.',
     key_once: 'Translate a region once', key_live: 'Live translation', key_clear: 'Clear the translation', key_wait: 'Press the keys…',
     key_note: 'Press a combination with Ctrl or Alt, or the middle or a side mouse button. Esc cancels.', key_bad: 'Include Ctrl or Alt',
     key_reset: 'Reset', key_disable: 'Disable', keys_reset: 'Reset all to defaults', key_none: 'Disabled',
@@ -615,6 +622,10 @@ function render(s) {
   $('message').textContent = s.message;
   $('version').textContent = s.version;
   $('folder').textContent = s.folder;
+  $('folder').previousElementSibling.textContent = T(s.model_folder_chosen ? 'folder_settings' : 'folder');
+  $('model_folder').textContent = s.model_folder;
+  $('folder_pick').disabled = downloading;
+  $('folder_reset').disabled = downloading || !s.model_folder_chosen;
   if (!introOpen && s.intro) {
     introOpen = true; $('intro').classList.add('on');
     if (s.intro_done) step = 2; // opened only to ask for the PLaMo license
@@ -704,6 +715,8 @@ $('history_clear').onclick = () => { send('history_clear'); past = []; renderHis
 $('opacity').onchange = e => { e.target.dataset.sent = e.target.value; send('opacity', +e.target.value); };
 for (const id of ['source', 'target', 'device', 'form', 'font']) $(id).onchange = e => { e.target.dataset.sent = e.target.value; send(id, e.target.value); };
 $('models').onchange = e => { e.target.dataset.sent = e.target.value; send('model', e.target.value); };
+$('folder_pick').onclick = () => send('model_folder_pick');
+$('folder_reset').onclick = () => send('model_folder_reset');
 $('ui_lang').onchange = e => send('ui_lang', e.target.value);
 $('gpu_limit').onchange = e => { e.target.dataset.sent = e.target.value; send('gpu_limit', e.target.value === '' ? null : +e.target.value); };
 $('threads').onchange = e => { e.target.dataset.sent = e.target.value; send('threads', e.target.value === '' ? null : +e.target.value); };

@@ -31,6 +31,7 @@ pub const ACTIONS: usize = 5; // one shot, live, clear, show the original, copy
 #[derive(Clone, Debug, PartialEq)]
 pub struct Config {
     pub model: String, // a file in the models folder
+    pub model_folder: String, // where the translation models are kept; "" for the app's own folder
     pub device: Device,
     pub cpu_threads: Option<usize>, // None: every performance core
     pub gpu_limit_mib: Option<u64>, // None: whatever fits
@@ -64,6 +65,7 @@ impl Default for Config {
         let ctrl_alt = |key: char| Hotkey { mods: MOD_CONTROL | MOD_ALT, key: key as u32 };
         Self {
             model: models::DEFAULT.to_string(),
+            model_folder: String::new(),
             device: Device::Auto,
             cpu_threads: None,
             gpu_limit_mib: None,
@@ -95,6 +97,7 @@ impl Config {
         if let Some(model) = saved["model"].as_str() {
             config.model = model.to_string();
         }
+        config.model_folder = saved["model_folder"].as_str().unwrap_or("").to_string();
         config.device = match saved["device"].as_str() {
             Some("cpu") => Device::Cpu,
             Some("gpu") => Device::Gpu,
@@ -145,6 +148,7 @@ impl Config {
         };
         let saved = json!({
             "model": self.model,
+            "model_folder": self.model_folder,
             "device": device,
             "cpu_threads": self.cpu_threads,
             "gpu_limit_mib": self.gpu_limit_mib,
@@ -257,6 +261,7 @@ mod tests {
     fn settings_survive_a_round_trip() {
         let mut config = Config::default();
         config.model = "custom.gguf".into();
+        config.model_folder = "D:/models".into();
         config.device = Device::Cpu;
         config.cpu_threads = Some(3);
         config.gpu_limit_mib = Some(1536);

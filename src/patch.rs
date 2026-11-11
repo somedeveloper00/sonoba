@@ -25,6 +25,10 @@ const STATUS_BG: u32 = 0x00201C1C;
 const STATUS_FG: u32 = 0x00F5F5F5;
 const MOVED_TENTHS: usize = 9; // of a patch's rows found again where it moved to
 const MIN_SCROLL_ROWS: usize = 8;
+const MONOSPACED_RUNS: usize = 5; // stretches of ink it takes to tell a grid of cells from chance
+const MONOSPACED_SLACK: f32 = 0.15; // of a cell: how far off the grid a letter's middle may sit
+const MONOSPACED_FEW: usize = 7; // fewer stretches than this must each be one letter: runs of them fit a grid too easily
+const MONOSPACED_STRAYS: usize = 16; // one stretch in so many may sit off the grid, as a quote mark's halves do
 
 /// The ink of one text line.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -126,9 +130,9 @@ fn pixel(bgra: &[u8], width: usize, x: usize, y: usize) -> [i32; 3] {
 /// into the lines above and below or past a button's edge, so only the band of ink rows at
 /// its middle counts, and the background comes from that middle too. Field borders and a
 /// leading icon are left out, so that neither is painted over or mistaken for tall text.
-/// `first_word` is what the recogniser read first, for telling a short word from an icon;
-/// without it icons are not looked for.
-pub fn glyphs(bgra: &[u8], width: usize, height: usize, (x, y, w, h): (i32, i32, i32, i32), first_word: Option<&str>) -> Option<Glyphs> {
+/// `text` is what the recogniser read, for telling a short first word from an icon; without it
+/// icons are not looked for.
+pub fn glyphs(bgra: &[u8], width: usize, height: usize, (x, y, w, h): (i32, i32, i32, i32), text: Option<&str>) -> Option<Glyphs> {
     let x0 = x.clamp(0, width as i32) as usize;
     let y0 = y.clamp(0, height as i32) as usize;
     let x1 = (x + w).clamp(0, width as i32) as usize;
@@ -196,10 +200,14 @@ pub fn glyphs(bgra: &[u8], width: usize, height: usize, (x, y, w, h): (i32, i32,
     // not the width that the first word read from the box would have. A field's edge can
     // come before the icon, so look more than once. A full stop can leave a gap inside a word,
     // as in "Q.Save", so the blob is held against the word up to it.
-    let first = first_word.unwrap_or("");
+    let first = text.and_then(|text| text.split(' ').next()).unwrap_or("");
     let first = first.split_inclusive('.').next().unwrap_or(first);
     let mut icon = false;
-    while first_word.is_some() {
+    // A monospaced font sets a short first word as far from the next as an icon stands from its
+    // label, and its letters can be as wide as the line is tall: their grid tells them apart.
+    let stretches = runs(cols.iter().filter(|&&col| (top..bottom).any(|row| is_ink(col, row))).map(|&col| col as i32));
+    let monospaced = text.is_some_and(|text| fixed_pitch(&stretches, (bottom - top) as i32, text.chars().count()).is_some());
+    while text.is_some() && !monospaced {
         let inked: Vec<usize> = cols.iter().copied().filter(|&col| (top..bottom).any(|row| is_ink(col, row))).collect();
         let tall = bottom - top;
         // A Hangul syllable is about as wide as the line is tall, twice a Latin letter, and Korean
@@ -359,12 +367,15 @@ fn is_letter(p: [i32; 3], fg: [i32; 3], bg: [i32; 3], picture: bool) -> bool {
 
 /// The detector box cut at blank gaps at least one and a half letters wide and well over the
 /// line's usual space between words: a menu bar or the cells of a table, read as one line, are
-/// each their own label. `chars` is how many letters the line was read as, which gives their
-/// width; their height can take in a picture's bright patches. A monospaced comma and space come
-/// close to the first test, so the second keeps prose whole. Each piece reaches halfway into the
-/// gaps on either side. A glow around the letters counts as blank.
-pub fn split_at_gaps(bgra: &[u8], width: usize, height: usize, rect: (i32, i32, i32, i32), chars: usize) -> Vec<(i32, i32, i32, i32)> {
-    let Some(g) = glyphs(bgra, width, height, rect, None) else { return vec![rect] };
+/// each their own label. `text` is what the line was read as: the number of its letters gives
+/// their width; their height can take in a picture's bright patches. A monospaced comma and space
+/// come close to the first test, so the second keeps prose whole. A monospaced font's thin
+/// letters, as in a game's pixel font, leave every space that wide: there a gap must be two
+/// cells wide. Each piece reaches halfway into the gaps on either side. A glow around the
+/// letters counts as blank.
+pub fn split_at_gaps(bgra: &[u8], width: usize, height: usize, rect: (i32, i32, i32, i32), text: &str) -> Vec<(i32, i32, i32, i32)> {
+    let chars = text.chars().filter(|c| !c.is_whitespace()).count();
+    let Some(g) = glyphs(bgra, width, height, rect, None).filter(|_| chars > 1) else { return vec![rect] };
     // Without a glow, a thin stem's few pixels can sit nearer the background than the ink.
     let glow = g.letters < g.h;
     let letter = |col: i32, row: i32| {
@@ -374,17 +385,12 @@ pub fn split_at_gaps(bgra: &[u8], width: usize, height: usize, rect: (i32, i32, 
         if glow { distance(p, g.fg) < distance(p, g.bg) } else { distance(p, g.bg) > GLYPH_DISTANCE }
     };
     let inked = |col: i32| (g.y..g.y + g.h).any(|row| letter(col, row));
-    let (mut gaps, mut blank_from) = (Vec::new(), None); // (start, width)
-    for col in g.x..g.x + g.w {
-        if !inked(col) {
-            blank_from.get_or_insert(col);
-        } else if let Some(start) = blank_from.take().filter(|&start| start > g.x) {
-            gaps.push((start, col - start));
-        }
-    }
+    let runs = runs((g.x..g.x + g.w).filter(|&col| inked(col)));
+    let gaps: Vec<(i32, i32)> = runs.windows(2).map(|r| (r[0].1, r[1].0 - r[0].1)).collect(); // (start, width)
     let between_words: i32 = gaps.iter().map(|&(_, w)| w).filter(|&w| w * 5 >= g.letters).sum();
-    let letter_w = (g.w - between_words) / chars.max(1) as i32;
-    let wide = |w: i32| w * 2 >= letter_w * 3;
+    let letter_w = (g.w - between_words) / chars as i32;
+    let cell = fixed_pitch(&runs, g.letters, text.chars().count());
+    let wide = |w: i32| w * 2 >= letter_w * 3 && cell.map_or(true, |cell| w as f32 >= cell * 2.0);
     let mut spaces: Vec<i32> = gaps.iter().map(|&(_, w)| w).filter(|&w| w * 5 >= g.letters && !wide(w)).collect();
     spaces.sort_unstable();
     let usual = spaces.get(spaces.len() / 2).copied().unwrap_or(0);
@@ -392,6 +398,44 @@ pub fn split_at_gaps(bgra: &[u8], width: usize, height: usize, rect: (i32, i32, 
     let (x, y, w, h) = rect;
     let edges: Vec<i32> = std::iter::once(x).chain(cuts).chain(std::iter::once(x + w)).collect();
     edges.windows(2).map(|e| (e[0], y, e[1] - e[0], h)).collect()
+}
+
+/// Each stretch of neighbouring columns, from and to.
+fn runs(cols: impl Iterator<Item = i32>) -> Vec<(i32, i32)> {
+    let mut runs: Vec<(i32, i32)> = Vec::new();
+    for col in cols {
+        match runs.last_mut() {
+            Some(run) if run.1 == col => run.1 = col + 1,
+            _ => runs.push((col, col + 1)),
+        }
+    }
+    runs
+}
+
+/// The width of a cell, if the stretches of ink sit on a grid of equal cells as a monospaced
+/// font's letters do. `cells` is how many letters and spaces the line was read as: the ink spans
+/// that many cells, less the blank sides of the first and the last. A stretch of two letters run
+/// together sits astride a boundary between cells, one of three in the middle of a cell again.
+/// `tall` is the height of the letters: a gap under a fifth of it lies between two of a word.
+fn fixed_pitch(runs: &[(i32, i32)], tall: i32, cells: usize) -> Option<f32> {
+    if runs.len() < MONOSPACED_RUNS || cells < 2 {
+        return None;
+    }
+    let mut between_letters: Vec<i32> = runs.windows(2).map(|r| r[1].0 - r[0].1).filter(|&w| w * 5 < tall).collect();
+    between_letters.sort_unstable();
+    let between_letters = between_letters.get(between_letters.len() / 2).copied().unwrap_or(0);
+    let span = (runs[runs.len() - 1].1 - runs[0].0) as f32;
+    (0..=20).map(|side| span / (cells as f32 - side as f32 / 20.0)).find(|&cell| {
+        let letters = |&(from, to): &(i32, i32)| ((to - from + between_letters) as f32 / cell).round().max(1.0);
+        if runs.len() < MONOSPACED_FEW && runs.iter().any(|run| letters(run) > 1.0) {
+            return false;
+        }
+        // Where in a cell each stretch's first letter has its middle, as a share of the cell.
+        let middles: Vec<f32> = runs.iter().map(|run| (((run.0 + run.1) as f32 - (letters(run) - 1.0) * cell) / 2.0 / cell).rem_euclid(1.0)).collect();
+        let apart = |a: f32, b: f32| (a - b).rem_euclid(1.0).min((b - a).rem_euclid(1.0));
+        let together = middles.iter().map(|&m| middles.iter().filter(|&&other| apart(m, other) <= MONOSPACED_SLACK).count()).max().unwrap_or(0);
+        runs.len() - together <= runs.len() / MONOSPACED_STRAYS
+    })
 }
 
 /// Takes the letters off a picture and leaves the rest of it. The rows just outside the box say

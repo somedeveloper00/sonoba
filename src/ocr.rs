@@ -189,10 +189,9 @@ impl Ocr {
         // can leave the space out of a wide gap too, as in "BackSave".
         let read_box = |rect: (usize, usize, usize, usize)| -> Result<Vec<Line>, String> {
             let Some((line, words)) = self.read_line(bgra, &img, (w, h), rect)? else { return Ok(Vec::new()) };
-            let chars = line.text.chars().filter(|c| !c.is_whitespace()).count();
             let (x, y, bw, bh) = rect;
             let (left, top) = (x as i32 - pad, y as i32 - pad);
-            let mut cuts: Vec<i32> = if chars > 1 { patch::split_at_gaps(bgra, w, h, (left, top, bw as i32, bh as i32), chars).iter().skip(1).map(|piece| piece.0).collect() } else { Vec::new() };
+            let mut cuts: Vec<i32> = patch::split_at_gaps(bgra, w, h, (left, top, bw as i32, bh as i32), &line.text).iter().skip(1).map(|piece| piece.0).collect();
             // Over a bright picture some gaps are not blank; where the recogniser put each letter
             // still shows them. Both ways can find the same gap.
             if !line.glyphs.icon {
@@ -230,8 +229,7 @@ impl Ocr {
         if ink.picture && score < PICTURE_TEXT_SCORE {
             return Ok(None);
         }
-        let first_word = text.split(' ').next().unwrap_or("");
-        Ok(patch::glyphs(bgra, w, h, in_frame, Some(first_word))
+        Ok(patch::glyphs(bgra, w, h, in_frame, Some(&text))
             .filter(|_| !text.is_empty())
             .map(|glyphs| (Line { glyphs, text: without_icon(text.clone(), glyphs.icon) }, words)))
     }
@@ -946,6 +944,25 @@ mod tests {
         let (bgra, w, h) = png_bgra("testdata/menu.png");
         let got: Vec<String> = paragraphs(&ocr.read(&bgra, w, h).unwrap()).into_iter().map(|b| b.text).collect();
         assert_eq!(got, ["Back", "Save", "Q.Save", "Q.Load", "Skip", "Auto", "Prefs", "Save your work before you close the window."]);
+    }
+
+    /// A game's dialogue in a monospaced pixel font, where every space is as wide as a menu's gaps.
+    #[test]
+    fn a_sentence_in_a_pixel_font_stays_whole() {
+        let ocr = Ocr::new(4, &[]).unwrap();
+        let (bgra, w, h) = png_bgra("testdata/pixel-mono.png");
+        let got: Vec<String> = paragraphs(&ocr.read(&bgra, w, h).unwrap()).into_iter().map(|b| b.text).collect();
+        assert_eq!(got, ["Mira", "A little rest never hurt anyone, quite the contrary! You should stay by the fire today."]);
+    }
+
+    /// A monospaced font sets "It" as far from the next word as an icon stands from its label, and
+    /// a line of two words has few letters to tell its grid by.
+    #[test]
+    fn short_words_in_a_monospaced_font_are_neither_icons_nor_labels() {
+        let ocr = Ocr::new(4, &[]).unwrap();
+        let (bgra, w, h) = png_bgra("testdata/mono-short.png");
+        let got: Vec<String> = paragraphs(&ocr.read(&bgra, w, h).unwrap()).into_iter().map(|b| b.text).collect();
+        assert_eq!(got, ["It is still a little chilly in the hall.", "I see.", "Why me?"]);
     }
 
     #[test]

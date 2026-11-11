@@ -28,6 +28,7 @@ use windows_sys::w;
 const BIG_ICON: i32 = 48;
 const TIMER: usize = 1;
 const TIMER_MS: u32 = 250;
+const PICK_FOLDER: u32 = WM_APP + 1; // posted by the page: a dialog must not run inside WebView2's own callback
 const WIDTH: i32 = 800;
 const HEIGHT: i32 = 620;
 const MIN_WIDTH: i32 = 640;
@@ -163,6 +164,8 @@ fn state() -> Value {
         "folder": data_dir().display().to_string(),
         "models": list,
         "model": config.model,
+        "model_folder": models::folder().display().to_string(),
+        "model_folder_chosen": !config.model_folder.is_empty(),
         "progress": models::PROGRESS.load(Ordering::Relaxed),
         "downloading": models::DOWNLOADING.lock().unwrap().clone(),
         "scripts": crate::ocr::SCRIPTS.iter().map(|s| json!({ "id": s.id, "present": models::is_present(&s.file()), "partial": models::has_part(&s.file()) })).collect::<Vec<_>>(),
@@ -263,6 +266,34 @@ fn choice_changed(change: impl FnOnce(&mut config::Config)) {
     }
 }
 
+/// The folder the user picks in Windows' own dialog, or None when they cancel.
+fn pick_folder() -> Option<PathBuf> {
+    use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, CoTaskMemFree};
+    use windows::Win32::UI::Shell::{FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName, SIGDN_FILESYSPATH};
+    unsafe {
+        let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+        dialog.SetOptions(dialog.GetOptions().ok()? | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM).ok()?;
+        let _ = dialog.SetTitle(&HSTRING::from(t("モデルの保存先")));
+        if let Ok(now) = SHCreateItemFromParsingName::<_, _, IShellItem>(&HSTRING::from(models::folder().as_os_str()), None) {
+            let _ = dialog.SetFolder(&now); // opens where the models are now
+        }
+        dialog.Show(Some(ComHwnd(window()))).ok()?; // an error when cancelled
+        let name = dialog.GetResult().ok()?.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let folder = name.to_string().ok().map(PathBuf::from);
+        CoTaskMemFree(Some(name.0 as *const _));
+        folder
+    }
+}
+
+/// The translation models are read from, and downloaded to, another folder from now on. Nothing is moved.
+fn set_model_folder(folder: Option<PathBuf>) {
+    if models::PROGRESS.load(Ordering::Relaxed) >= 0 {
+        return; // a download is under way to the old folder
+    }
+    let chosen = folder.filter(|f| *f != models::dir()).map_or_else(String::new, |f| f.display().to_string());
+    choice_changed(|c| c.model_folder = chosen);
+}
+
 fn delete_model() {
     let file = config::get().model;
     crate::unload_now();
@@ -292,6 +323,10 @@ fn on_message(text: &str) {
             }
         }
         "model" => choice_changed(|c| c.model = text_value),
+        "model_folder_pick" => unsafe {
+            PostMessageW(window(), PICK_FOLDER, 0, 0);
+        },
+        "model_folder_reset" => set_model_folder(None),
         "device" => choice_changed(|c| {
             c.device = match text_value.as_str() {
                 "gpu" => Device::Gpu,
@@ -460,6 +495,13 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
         match msg {
             WM_TIMER => {
                 refresh();
+                0
+            }
+            PICK_FOLDER => {
+                if let Some(folder) = pick_folder() {
+                    set_model_folder(Some(folder));
+                    refresh();
+                }
                 0
             }
             WM_SIZE => {

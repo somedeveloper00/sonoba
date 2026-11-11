@@ -286,8 +286,10 @@ fn chunks<'a>(texts: &[&'a str]) -> Vec<Vec<&'a str>> {
 }
 
 /// What the model is told comes with chunk `i`. A label alone is ambiguous, "Exit" a way out
-/// and "Auto" a car, so it gets the labels around it, which say what kind of screen this is;
-/// anything else, or a label with none around it, gets the chunk before it.
+/// and "Auto" a car, so it gets the labels around it, which say what kind of screen this is.
+/// With none around and text after it, it is a heading or a speaker's name and goes without:
+/// what stands before has little to do with it, and after a window's title a name came back
+/// untranslated. Anything else, a button under its message too, gets the chunk before it.
 fn context_for(chunks: &[Vec<&str>], i: usize) -> String {
     let label = |c: &Vec<&str>| c.len() == 1 && is_fragment(c[0]);
     if label(&chunks[i]) {
@@ -295,6 +297,9 @@ fn context_for(chunks: &[Vec<&str>], i: usize) -> String {
         let labels: Vec<&str> = near.iter().filter(|c| label(c)).map(|c| c[0]).collect();
         if labels.len() > 1 {
             return tail(&labels.join(" "));
+        }
+        if i + 1 < chunks.len() {
+            return String::new();
         }
     }
     if i > 0 { tail(&chunks[i - 1].join(" ")) } else { String::new() }
@@ -626,6 +631,8 @@ mod tests {
         assert_eq!(context_for(&chunks[..1], 0), "");
         let lone = vec![vec![sentence], vec!["Exit"]];
         assert_eq!(context_for(&lone, 1), sentence);
+        let name = vec![vec!["A window's title, which is no label either."], vec!["Mira"], vec![sentence]];
+        assert_eq!(context_for(&name, 1), "");
     }
 
     #[test]

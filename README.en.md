@@ -18,7 +18,7 @@ Built with PLaMo.
 
 The supported OS is Windows 11. No installation is required. The Visual C++ runtime is included in the zip file, so it works without installing it separately. Extract the zip file to your preferred folder and launch `sonoba.exe`. The first time you run it, a guide opens: select the display language and a translation model. The guide offers the light and standard sizes; larger models can be downloaded later from Model in the settings. If you choose PLaMo 3 Translate, the guide asks you to agree to the PLaMo Community License before the download, and PLaMo 3 Translate does not translate until you agree. Hy-MT2 needs no agreement.
 
-Settings and models are saved in the `data` folder next to the exe. Deleting the entire folder will also delete the app. To update, overwrite the folder with the contents of a new zip file. If you place the app in a location it cannot write to, such as Program Files, they are saved in the `Sonoba` folders in `%APPDATA%` and `%LOCALAPPDATA%`. If you are using auto-start, disable this in the settings before deleting the folder.
+Settings and models are saved in the `data` folder next to the exe. Deleting the entire folder will also delete the app. The folder for translation models can be changed in the settings. To update, overwrite the folder with the contents of a new zip file. If you place the app in a location it cannot write to, such as Program Files, they are saved in the `Sonoba` folders in `%APPDATA%` and `%LOCALAPPDATA%`. If you are using auto-start, disable this in the settings before deleting the folder.
 
 Since this is a downloaded file, you may encounter a SmartScreen warning upon the first launch. Select "Run anyway" under "More info," or check "Unblock" in the zip properties before extracting. On PCs where Smart App Control is enabled, this step is required before extraction.
 
@@ -69,7 +69,7 @@ Double-click the system tray icon to open Settings. The Settings screen is displ
 - Style: Automatic, polite, plain. Auto matches the tone of the original. Only with PLaMo 3 Translate.
 - Glossary: A list of words for which you want a fixed translation. It is used only when the word appears in the original text.
 - Languages to read: Korean comes installed. Russian, Arabic, Thai, Hindi, Tamil and Telugu become readable once chosen and downloaded. Each can be deleted
-- Translation model: Select, download, delete, load, unload
+- Translation model: Select, download, delete, load, unload, change the folder
 - Execution Method: Automatic, GPU Only, CPU Only
 - GPU Memory Limit: When set to Automatic, select the maximum GPU memory used by the translation engine.
 - CPU Threads: When set to Auto, the number of performance cores is used. You can reduce this to your preferred number.
@@ -117,7 +117,9 @@ When the target language is English, sentences containing only Latin characters 
 | Hy-MT2 1.8B Light | 0.8GB | The standard one made smaller by unsloth, at 3 bits (UD-IQ3_XXS). About 1.4GB of memory. Translations are a little worse than the standard one. |
 | Hy-MT2 1.8B Standard | 1.1GB | Tencent's model. Apache License 2.0, so it needs no agreement and can be used at work. About as fast as 2B, about 1.7GB of GPU memory. The style setting does not apply. |
 
-Other models can also be used. Placing GGUF files in `data\models` will make them appear in the settings list. Models whose filenames do not start with `plamo-3-translate` are asked to translate through their own chat template. Models whose filenames start with `Hy-MT` are asked in the words of their model card.
+Other models can also be used. Placing GGUF files in the model folder (`data\models` by default) will make them appear in the settings list. The kind of a model is told from the name written inside the GGUF file, and from the filename where that does not say. A PLaMo 3 Translate file is treated as PLaMo 3 Translate even when another app has stored it under a different name, and its license is asked for. The Hy-MT2 files Tencent distributes carry only "1.8B" as their name inside, so a file is treated as Hy-MT2 when its filename contains `Hy-MT`, and is asked in the words of the model card. Any other model is asked to translate through its own chat template.
+
+The model folder can be changed with "Choose folder" under Model in the settings. A folder shared with other apps, or one on another drive, can be chosen. The GGUF files in the chosen folder appear in the settings list, and downloads are saved there. Changing the folder neither moves nor deletes the models in the old one. The OCR models stay in `data\models` whichever folder is chosen.
 
 If you cancel the download, files left unfinished will be retained, and the next download will pick up from where they left off. If you no longer need them, you can delete them using "Delete."
 

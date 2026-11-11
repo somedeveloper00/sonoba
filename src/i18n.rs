@@ -29,6 +29,7 @@ const ENGLISH: &[(&str, &str)] = &[
     ("そのキーは使えません（別の操作や別のアプリが使っています）", "That key is taken, by another action or another app"),
     ("削除できません: ", "Cannot delete: "),
     ("Sonoba の設定", "Sonoba settings"),
+    ("モデルの保存先", "Model folder"),
     ("設定画面を開けません。WebView2 ランタイムが必要です。", "The settings window cannot open. It needs the WebView2 Runtime."),
     ("訳文をコピーしました", "Translation copied"),
     ("コピーする訳文がありません", "No translation to copy"),
