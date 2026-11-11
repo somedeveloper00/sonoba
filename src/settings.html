@@ -226,6 +226,7 @@ kbd { font: inherit; font-size: 12.5px; padding: 2px 8px; border: 1px solid var(
     <div class="card">
       <div class="row"><div><b data-t="font"></b></div><select id="font"></select></div>
       <div class="row"><div><b data-t="bold_text"></b><small data-t="bold_note"></small></div><label class="switch"><input type="checkbox" id="bold_text"><i></i></label></div>
+      <div class="row"><div><b data-t="blur_background"></b></div><label class="switch"><input type="checkbox" id="blur_background"><i></i></label></div>
       <div class="row"><div><b data-t="opacity"></b><small data-t="opacity_note"></small></div><select id="opacity"></select></div>
     </div>
   </section>
@@ -350,6 +351,7 @@ const TEXT = {
     mouse_mid: 'マウス中ボタン', mouse_back: 'マウス戻るボタン', mouse_next: 'マウス進むボタン',
     form: '文体', form_note: '翻訳先が日本語で、モデルが PLaMo のときに使います', form_auto: 'おまかせ（原文に合わせる）', form_polite: 'です・ます調', form_plain: 'だ・である調',
     glossary: '用語集', glossary_note: '決まった訳にしたい言葉を登録します。原文にその言葉があるときだけ使います', term_add: '追加', term_from: '原文の言葉', term_to: '訳語',
+    blur_background: '訳文の背景をぼかす',
     font: '訳文のフォント', font_default: '標準（Yu Gothic UI）', bold_text: '訳文を太字にする', bold_note: 'オフのときは元の文字に合わせます', opacity: '訳文の濃さ', opacity_note: '下げると元の画面が透けて見えます',
     nav_history: '履歴', keep_history: '履歴を残す', keep_note: 'アプリを終了すると消えます。ファイルには保存しません', clear: 'すべて消す', find: '履歴を検索', history_empty: 'まだ履歴はありません', history_note: 'クリックすると訳文をコピーします。', copied: 'コピーしました',
     show_frame: '翻訳している範囲に緑の枠線を表示する', show_frame_note: '選んだ範囲かウィンドウの外側に細い線を出します', flash_frame: '翻訳が終わったら枠線を一瞬表示する',
@@ -400,6 +402,7 @@ const TEXT = {
     mouse_mid: 'Middle mouse button', mouse_back: 'Mouse back button', mouse_next: 'Mouse forward button',
     form: 'Style', form_note: 'For Japanese output with a PLaMo model', form_auto: 'Automatic (follows the original)', form_polite: 'Polite (desu/masu)', form_plain: 'Plain (da/dearu)',
     glossary: 'Glossary', glossary_note: 'Words that must get a fixed translation. Used only when the original contains them', term_add: 'Add', term_from: 'Word in the original', term_to: 'Translation',
+    blur_background: 'Blur text background',
     font: 'Translation font', font_default: 'Default (Yu Gothic UI)', bold_text: 'Always bold', bold_note: 'Off follows the original text', opacity: 'Strength', opacity_note: 'Lower lets the screen show through',
     nav_history: 'History', keep_history: 'Keep a history', keep_note: 'Gone when the app exits. Nothing is saved to a file', clear: 'Clear all', find: 'Search the history', history_empty: 'Nothing here yet', history_note: 'Click an entry to copy its translation.', copied: 'Copied',
     show_frame: 'Show a green frame around the region', show_frame_note: 'A thin line just outside the region or window', flash_frame: 'Flash the frame when a translation finishes',
@@ -578,7 +581,7 @@ function render(s) {
   if (page === 'history') renderHistory();
   $('gpu_limit').disabled = s.device !== 'auto';
   $('ui_lang').value = s.ui_lang;
-  for (const id of ['show_frame', 'flash_frame', 'shared', 'autostart', 'bold_text', 'keep_history']) $(id).checked = s[id];
+  for (const id of ['show_frame', 'flash_frame', 'shared', 'autostart', 'bold_text', 'blur_background', 'keep_history']) $(id).checked = s[id];
   for (const b of document.querySelectorAll('[data-key]')) {
     const i = +b.dataset.key;
     b.classList.toggle('wait', i === waiting);
@@ -704,7 +707,7 @@ $('models').onchange = e => { e.target.dataset.sent = e.target.value; send('mode
 $('ui_lang').onchange = e => send('ui_lang', e.target.value);
 $('gpu_limit').onchange = e => { e.target.dataset.sent = e.target.value; send('gpu_limit', e.target.value === '' ? null : +e.target.value); };
 $('threads').onchange = e => { e.target.dataset.sent = e.target.value; send('threads', e.target.value === '' ? null : +e.target.value); };
-for (const id of ['show_frame', 'flash_frame', 'shared', 'autostart', 'bold_text', 'keep_history']) $(id).onchange = e => send(id, e.target.checked);
+for (const id of ['show_frame', 'flash_frame', 'shared', 'autostart', 'bold_text', 'blur_background', 'keep_history']) $(id).onchange = e => send(id, e.target.checked);
 $('download').onclick = () => send(state.progress >= 0 ? 'cancel' : 'download');
 $('delete').onclick = () => {
   const m = state.models.find(x => x.file === state.model);

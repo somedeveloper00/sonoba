@@ -7,6 +7,7 @@
 #![windows_subsystem = "windows"]
 
 mod bar;
+mod blur;
 mod capture;
 mod toast;
 mod config;
@@ -514,7 +515,9 @@ fn watch(job: Job, overlay: usize, shared: &Shared) {
                     unsafe { PostMessageW(overlay as HWND, WM_PARTS, job.id as usize, 0) };
                 }
             }
-            if frame != last {
+            let changed = frame != last;
+            let changed_for_blur = changed && (job.live || last.is_empty());
+            if changed {
                 let first = last.is_empty();
                 if job.live || first {
                     if job.live {
@@ -530,6 +533,8 @@ fn watch(job: Job, overlay: usize, shared: &Shared) {
                     return finish();
                 }
             }
+            // The renderer uses the accepted image, including frozen one-shot regions. No new grab.
+            blur::publish(overlay, job.id, current.region, &last, changed_for_blur);
         }
         let watching = job.live && (PARTS.lock().unwrap().is_empty() || PARTS.lock().unwrap().iter().any(|p| p.live));
         std::thread::sleep(if watching || last.is_empty() { POLL } else { WATCH });
@@ -1402,7 +1407,11 @@ unsafe extern "system" fn select_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM
 
 /// `narrow` is the letters' width in percent of the font's own.
 unsafe fn text_font(px: i32, bold: bool, narrow: i32) -> HFONT {
-    let font = unsafe { font_of(px, 0, bold) };
+    unsafe { text_font_quality(px, bold, narrow, CLEARTYPE_QUALITY as u32) }
+}
+
+unsafe fn text_font_quality(px: i32, bold: bool, narrow: i32, quality: u32) -> HFONT {
+    let font = unsafe { font_of(px, 0, bold, quality) };
     if narrow >= 100 {
         return font;
     }
@@ -1414,11 +1423,11 @@ unsafe fn text_font(px: i32, bold: bool, narrow: i32) -> HFONT {
         SelectObject(dc, old);
         ReleaseDC(null_mut(), dc);
         DeleteObject(font);
-        font_of(px, (metrics.tmAveCharWidth * narrow / 100).max(1), bold)
+        font_of(px, (metrics.tmAveCharWidth * narrow / 100).max(1), bold, quality)
     }
 }
 
-unsafe fn font_of(px: i32, width: i32, bold: bool) -> HFONT {
+unsafe fn font_of(px: i32, width: i32, bold: bool, quality: u32) -> HFONT {
     let config = config::get();
     let face = wide_z(if config.font.is_empty() { DEFAULT_FONT } else { &config.font });
     unsafe {
@@ -1434,7 +1443,7 @@ unsafe fn font_of(px: i32, width: i32, bold: bool) -> HFONT {
             DEFAULT_CHARSET as u32,
             OUT_DEFAULT_PRECIS as u32,
             CLIP_DEFAULT_PRECIS as u32,
-            CLEARTYPE_QUALITY as u32,
+            quality,
             DEFAULT_PITCH as u32,
             face.as_ptr(),
         )
@@ -1613,8 +1622,10 @@ fn show_patches(mut patches: Vec<Patch>) {
 
 /// Applies the font and strength from the settings to what is on show.
 pub fn look_changed() {
+    blur::configure();
     UI.with(|ui| unsafe {
-        SetLayeredWindowAttributes(ui.overlay.get(), KEY_COLOR, (config::get().opacity as u32 * 255 / 100) as u8, LWA_COLORKEY | LWA_ALPHA);
+        let alpha = if blur::active(ui.overlay.get()) { 255 } else { (config::get().opacity as u32 * 255 / 100) as u8 };
+        SetLayeredWindowAttributes(ui.overlay.get(), KEY_COLOR, alpha, LWA_COLORKEY | LWA_ALPHA);
         let patches = ui.patches.borrow().clone();
         if !patches.is_empty() {
             show_patches(patches);
@@ -1787,6 +1798,23 @@ unsafe fn draw_patches(hdc: HDC, patches: &[Patch]) {
                 None => fill(hdc, &RECT { left: p.x, top: p.y, right: p.x + p.w, bottom: p.y + p.h }, p.bg),
             }
         }
+        draw_patch_text(hdc, patches, None);
+    }
+}
+
+/// Color and grayscale coverage for the GPU's text-only layer. Background blur stays on the GPU.
+unsafe fn draw_text_layer(hdc: HDC, patches: &[Patch], mask: bool) {
+    unsafe {
+        for p in patches.iter().filter(|p| p.source.is_empty()) {
+            fill(hdc, &RECT { left: p.x, top: p.y, right: p.x + p.w, bottom: p.y + p.h }, if mask { 0x00FFFFFF } else { p.bg });
+        }
+        draw_patch_text(hdc, patches, Some(mask));
+    }
+}
+
+unsafe fn draw_patch_text(hdc: HDC, patches: &[Patch], mask: Option<bool>) {
+    unsafe {
+        SetBkMode(hdc, TRANSPARENT as i32);
         // A second pass, so no patch can paint over the text of the one before it. Text stays on
         // what its patch painted: the outline off its left edge would blend into the overlay's
         // see-through colour and show as pink.
@@ -1794,7 +1822,8 @@ unsafe fn draw_patches(hdc: HDC, patches: &[Patch]) {
             let (w, h) = p.backdrop.as_ref().map_or((p.w, p.h), |b| (b.w, b.h));
             let saved = SaveDC(hdc);
             IntersectClipRect(hdc, p.x, p.y, p.x + w, p.y + h);
-            let font = text_font(p.px, p.bold, p.narrow);
+            let quality = if mask.is_some() { ANTIALIASED_QUALITY } else { CLEARTYPE_QUALITY };
+            let font = text_font_quality(p.px, p.bold, p.narrow, quality as u32);
             let old_font = SelectObject(hdc, font);
             let top = p.y + (p.h - p.text_h) / 2;
             // DT_EDITCONTROL drops a last line that overhangs, so the box must hold all of it.
@@ -1802,7 +1831,7 @@ unsafe fn draw_patches(hdc: HDC, patches: &[Patch]) {
             let text = wrapped(hdc, &p.text, p.w);
             let write = |dx: i32, dy: i32, color: u32| {
                 let mut at = RECT { left: area.left + dx, top: area.top + dy, right: area.right + dx, bottom: area.bottom + dy };
-                SetTextColor(hdc, color);
+                SetTextColor(hdc, if mask == Some(true) { 0x00FFFFFF } else { color });
                 DrawTextW(hdc, text.as_ptr(), text.len() as i32, &mut at, TEXT_FLAGS);
             };
             if p.backdrop.is_some() {
@@ -1826,6 +1855,19 @@ unsafe fn paint_overlay(hwnd: HWND) {
         let hdc = BeginPaint(hwnd, &mut ps);
         let mut client: RECT = std::mem::zeroed();
         GetClientRect(hwnd, &mut client);
+        let was_gpu = blur::active(hwnd);
+        let gpu = UI.with(|ui| blur::paint(hwnd, ui.overlay.get(), ui.job_id.get(), ui.region.get(), (client.right, client.bottom), &ui.patches.borrow()));
+        if gpu != was_gpu {
+            let alpha = if gpu { 255 } else { (config::get().opacity as u32 * 255 / 100) as u8 };
+            SetLayeredWindowAttributes(hwnd, KEY_COLOR, alpha, LWA_COLORKEY | LWA_ALPHA);
+        }
+        if gpu {
+            fill(hdc, &client, KEY_COLOR);
+            EndPaint(hwnd, &ps);
+            if UI.with(|ui| ui.overlay.get()) == hwnd { share::repaint(); }
+            return;
+        }
+        blur::release(hwnd);
         // Off screen first: drawing straight to the window would flash the original through.
         let mem = CreateCompatibleDC(hdc);
         let bitmap = CreateCompatibleBitmap(hdc, client.right, client.bottom);
@@ -1844,6 +1886,16 @@ unsafe extern "system" fn overlay_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARA
     unsafe {
         match msg {
             WM_ERASEBKGND => 1,
+            blur::WM_SOURCE => {
+                blur::receive(UI.with(|ui| ui.job_id.get()));
+                InvalidateRect(hwnd, null(), 0);
+                share::repaint();
+                0
+            }
+            WM_NCDESTROY => {
+                blur::release(hwnd);
+                DefWindowProcW(hwnd, msg, w, l)
+            }
             WM_PAINT => {
                 paint_overlay(hwnd);
                 0

@@ -111,7 +111,7 @@ pub fn repaint() {
     unsafe {
         let mut over: RECT = std::mem::zeroed();
         GetWindowRect(OVERLAY.get(), &mut over);
-        let alpha = (config::get().opacity as u32 * 255 / 100) as u8;
+        let alpha = if crate::blur::active(copy) { 255 } else { (config::get().opacity as u32 * 255 / 100) as u8 };
         SetLayeredWindowAttributes(copy, KEY_COLOR, alpha, LWA_COLORKEY | LWA_ALPHA);
         let (x, y) = off_screen();
         SetWindowPos(copy, null_mut(), x, y, over.right - over.left, over.bottom - over.top, SWP_NOZORDER | SWP_NOACTIVATE);

@@ -46,6 +46,7 @@ pub struct Config {
     pub glossary: Vec<(String, String)>, // term, and the translation it must get
     pub font: String, // "" for the app's default
     pub bold_text: bool, // always, not only where the original is bold
+    pub blur_background: bool, // use the captured picture, blurred on the GPU, behind text
     pub opacity: u8, // percent, of everything drawn over the screen
     pub keep_history: bool, // in memory only: nothing read off the screen goes to disk
     pub hotkeys: [Hotkey; ACTIONS],
@@ -78,6 +79,7 @@ impl Default for Config {
             glossary: Vec::new(),
             font: String::new(),
             bold_text: false,
+            blur_background: false,
             opacity: 100,
             keep_history: true,
             hotkeys: [ctrl_alt('T'), ctrl_alt('R'), ctrl_alt('X'), ctrl_alt('Q'), ctrl_alt('C')],
@@ -122,6 +124,7 @@ impl Config {
             config.glossary = terms.iter().filter_map(pair).collect();
         }
         config.font = saved["font"].as_str().unwrap_or("").to_string();
+        config.blur_background = saved["blur_background"].as_bool().unwrap_or(false);
         config.bold_text = saved["bold_text"].as_bool().unwrap_or(false);
         config.opacity = saved["opacity"].as_u64().map_or(100, |o| o.clamp(30, 100) as u8);
         config.keep_history = saved["keep_history"].as_bool().unwrap_or(true);
@@ -161,6 +164,7 @@ impl Config {
             "form": self.form,
             "glossary": self.glossary,
             "font": self.font,
+            "blur_background": self.blur_background,
             "bold_text": self.bold_text,
             "opacity": self.opacity,
             "keep_history": self.keep_history,
@@ -271,6 +275,7 @@ mod tests {
         config.glossary = vec![("bank".into(), "川岸".into())];
         config.font = "Meiryo".into();
         config.bold_text = true;
+        config.blur_background = true;
         config.opacity = 80;
         config.keep_history = false;
         assert_eq!(Config::parse(&config.to_json()), config);
@@ -279,6 +284,12 @@ mod tests {
     #[test]
     fn a_byte_order_mark_is_no_damage() {
         assert!(Config::parse("\u{FEFF}{\"show_frame\": true}").show_frame);
+    }
+
+    #[test]
+    fn old_settings_keep_the_original_background() {
+        assert!(!Config::parse("{\"font\":\"Meiryo\"}").blur_background);
+        assert!(!Config::parse("{\"blur_background\":\"true\"}").blur_background);
     }
 
     #[test]

@@ -185,6 +185,7 @@ fn state() -> Value {
         "form": config.form,
         "glossary": config.glossary,
         "font": config.font,
+        "blur_background": config.blur_background,
         "fonts": fonts(),
         "bold_text": config.bold_text,
         "opacity": config.opacity,
@@ -328,6 +329,10 @@ fn on_message(text: &str) {
         }
         "bold_text" => {
             config::update(|c| c.bold_text = flag);
+            crate::look_changed();
+        }
+        "blur_background" => {
+            config::update(|c| c.blur_background = flag);
             crate::look_changed();
         }
         "opacity" => {
